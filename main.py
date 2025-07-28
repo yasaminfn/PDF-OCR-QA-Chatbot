@@ -15,7 +15,7 @@ def clean_text(text):
 from langchain_community.document_loaders import PyPDFLoader
 
 #file path
-pdf_path = "attention.pdf"
+pdf_path = "data/attention.pdf"
 
 #loading the pdf
 loader = PyPDFLoader(pdf_path)
@@ -44,9 +44,13 @@ from pdf2image import convert_from_path
 #Saving the low text pages as png images
 POPPLER_PATH = os.getenv("POPPLER_PATH")
 
+image_dir = "data/images"
+os.makedirs(image_dir, exist_ok=True)
+    
 for idx, page_num in enumerate(low_text_pages):
+    image_path = os.path.join(image_dir, f"page_{page_num+1}.png")
     image = convert_from_path(pdf_path, dpi=300, poppler_path=POPPLER_PATH, first_page=page_num+1, last_page=page_num+2)[0]
-    image.save(f"page_{page_num+1}.png", "PNG") #Saves the image as a PNG file named "page_num+1.png" in the current directory.
+    image.save(image_path, "PNG")#Saves the image as a PNG file named "page_num+1.png"
     print(f"Saved page {page_num+1} as image")
 
 import pytesseract
@@ -69,7 +73,7 @@ else:
     ocr_texts = []
 
     for page_num in low_text_pages:
-        img_path = f"page_{page_num+1}.png"
+        img_path = os.path.join(image_dir, f"page_{page_num+1}.png")
         img = Image.open(img_path)
         text = pytesseract.image_to_string(img)
         print(f"OCR text from page {page_num+1}: {len(text)} chars")
