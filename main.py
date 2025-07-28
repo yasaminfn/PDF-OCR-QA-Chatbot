@@ -4,37 +4,24 @@ import os
 load_dotenv()
 OPENAI_API_KEY=os.getenv("OPENAI_API_KEY")
 
+import logging  # Import Python's built-in logging module
+import os       # Import os module to work with the file system
 
-import logging  # Import the logging module to handle logging in the application
-import os       # Import the os module to work with the file system
+os.makedirs("logs", exist_ok=True)  # Create a "logs" directory if it doesn't exist
 
-# Create a folder named 'logs' if it doesn't already exist
-os.makedirs("logs", exist_ok=True)
+logger = logging.getLogger("file_api_logger")  # Create a custom logger named "file_api_logger"
+logger.setLevel(logging.INFO)  # Set logging level to INFO
 
-# Create a logger object with a custom name ('file_api_logger')
-logger = logging.getLogger("file_api_logger")
+file_handler = logging.FileHandler("logs/app.log")  # Log messages will be written to logs/app.log
 
-# Set the minimum level of messages this logger will handle (INFO and above)
-logger.setLevel(logging.INFO)
-
-# Create a file handler that writes log messages to 'logs/app.log'
-file_handler = logging.FileHandler("logs/app.log")
-
-# Define the format of log messages:
-# - asctime: the date and time of the log
-# - api_path: (custom field – you'll need to pass it in the log manually)
-# - levelname: the log level (e.g. INFO, ERROR)
-# - message: the actual log message
-formatter = logging.Formatter(
+formatter = logging.Formatter(  # Define the format of log messages
     "%(asctime)s, %(api_path)s, %(levelname)s, %(message)s",
     datefmt="%Y-%m-%d, %H:%M:%S"
 )
 
-# Attach the formatter to the file handler so logs are saved in that format
-file_handler.setFormatter(formatter)
+file_handler.setFormatter(formatter)  # Attach the formatter to the file handler
+logger.addHandler(file_handler)  # Add the file handler to the logger
 
-# Add the file handler to the logger so it knows where to send log messages
-logger.addHandler(file_handler)
 
 
 #cleans the text
@@ -48,7 +35,7 @@ def clean_text(text):
 from langchain_community.document_loaders import PyPDFLoader
 
 #file path
-pdf_path = "attention.pdf"
+pdf_path = "data/attention.pdf"
 
 #loading the pdf
 loader = PyPDFLoader(pdf_path)
@@ -67,7 +54,6 @@ low_text_pages = []
 for i, doc in enumerate(documents):
     text_length = len(doc.page_content.strip())
     if text_length < 1500: 
-        print(f"Page {i + 1} has low text ({text_length} chars)")
         logger.warning(f"Page {i + 1} has low text ({text_length} chars)", extra={"api_path": "check_low_text"})
         low_text_pages.append(i)
 
@@ -77,18 +63,17 @@ for doc in documents:
     doc.metadata["page_number"] = doc.metadata.get("page", -1)
 
 from pdf2image import convert_from_path
+from pdf2image import convert_from_path
 POPPLER_PATH = os.getenv("POPPLER_PATH")
 
 image_dir = "data/images"
 os.makedirs(image_dir, exist_ok=True)
-    
 #Saving the low text pages as png images
 for idx, page_num in enumerate(low_text_pages):
     image_path = os.path.join(image_dir, f"page_{page_num+1}.png")
-    image = convert_from_path(pdf_path, dpi=300, poppler_path= POPPLER_PATH, first_page=page_num+1, last_page=page_num+2)[0]
+    image = convert_from_path(pdf_path, dpi=300, poppler_path=POPPLER_PATH, first_page=page_num+1, last_page=page_num+2)[0]
     image.save(image_path, "PNG") #Saves the image as a PNG file named "page_num+1.png" in the current directory.
     logger.info(f"Saved page {page_num+1} as image", extra={"api_path": "convert_to_image"})
-    print(f"Saved page {page_num+1} as image")
 
 import pytesseract
 from PIL import Image
@@ -100,9 +85,10 @@ pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
 
 import json
 #checks to see if the ocr_text exists from before
-if os.path.exists("ocr_texts.json"):
-    print("ocr_texts.json already exists!")
-    with open('ocr_texts.json', 'r') as f:
+ocr_json_path = f"{os.path.splitext(pdf_path)[0]}_ocr_texts.json" #file name based on the PDF name
+if os.path.exists(ocr_json_path):
+    print(f"{ocr_json_path} already exists!")
+    with open(ocr_json_path, 'r') as f:
         ocr_texts = json.load(f)
 
 else:
@@ -113,14 +99,14 @@ else:
         img_path = os.path.join(image_dir, f"page_{page_num+1}.png")
         img = Image.open(img_path)
         text = pytesseract.image_to_string(img)
-        print(f"OCR text from page {page_num+1}: {len(text)} chars")
+        logger.info(f"OCR text from page {page_num+1}: {len(text)} chars", extra={"api_path": "OCR"})
         ocr_texts.append({
             "page": page_num,
             "text": text
         })    
-    with open("ocr_texts.json","w") as f:
+    with open(ocr_json_path,"w") as f:
         json.dump(ocr_texts, f)
-        print("created ocr_texts.json!")
+        print(f"created {ocr_json_path}!")
     
     
 
@@ -184,14 +170,32 @@ print(f"Total chunks: {len(split_docs)}")
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 
+import uuid
+
+from langchain_core.messages import SystemMessage, AIMessage, HumanMessage
+#from langchain_postgres import PostgresChatMessageHistory
+from langchain.memory.chat_message_histories import PostgresChatMessageHistory
+import psycopg
+
 #memory
-memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+session_id = str(uuid.uuid4())
+#connection_string = psycopg.connect("postgresql://langchain:langchain@localhost:6024/langchain")
+chat_memory = PostgresChatMessageHistory(
+    session_id=session_id,
+    connection_string="postgresql://langchain:langchain@localhost:6024/langchain",
+    table_name='history'
+)#it's a BaseChatMemory
+
+
+memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True, chat_memory= chat_memory)
+
 
 
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
 
 embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+
 
 from langchain_postgres import PGVector
 
@@ -219,60 +223,77 @@ from langchain.chains import RetrievalQA
 chat = ChatOpenAI(model="gpt-3.5-turbo", temperature=0, openai_api_key=OPENAI_API_KEY)
 
 # creating a q&a chain
-#qa_chain = RetrievalQA.from_chain_type(llm=chat, chain_type="stuff", retriever=retriever, memory=memory)
+"""
+qa_chain = RetrievalQA.from_chain_type(llm=chat, chain_type="stuff", retriever=retriever, memory=memory)
 #output_key="result"  saves the result in the memory, it can only save one(result or source_document)
+
+"""
 
 from langchain.chains import ConversationalRetrievalChain
 
 qa_chain = ConversationalRetrievalChain.from_llm(llm=chat, chain_type="stuff", retriever=retriever, memory=memory)
 
+prompt_template = """
+        You are a helpful and honest AI assistant.
+
+        ---
+
+        Answer the question with the following guidelines:
+
+        1. If the answer can be found in the provided content, respond ONLY based on that content.
+        2. The answer should be complete.
+        3. If you are confident but the answer is brief, provide that. If the answer is not fully supported by content, respond with: "I do not have enough information to answer comprehensively."
+        4. If the question is general (e.g., hello, how are you?), give a friendly, common response.
+
+        ---
+
+        Content:
+        {context}
+
+        Question:
+        {query}
+
+        Answer:
+        """
+        
+from langchain_core.prompts import PromptTemplate
+
+prompt = PromptTemplate(template=prompt_template, input_variables=["context", "query"])
+
 
 while(True):
     #question
     query = input("**Please enter your question: ")
- 
-    #invoking the chain
+
     if query.lower() == 'exit':
         logger.info("User exited the chat", extra={"api_path": "user_query"})
         break
-        
+    
     logger.info("User entered a question", extra={"api_path": "user_query"})
     logger.info(f"User query: {query}", extra={"api_path": "user_query"})
-
+    
     try:
+        # You should replace 'content' with your context from the PDF / OCR / source
         context = qa_chain.invoke(query, return_only_outputs=False)
-        print(context)
-        prompt = f"""Answer the following question, 
-                    - If the context contains relevant information to answer the question, answer ONLY based on that information.
-                    - If the context does NOT contain relevant information, answer the question based on your own knowledge.
+                
+        # Fill the prompt with actual content and question
+        prompt_value = prompt.format(context=context, query=query)
 
-                    Context:
-                    {context["answer"]}
-                    
-
-                    Question:
-                    {query}
-        """
-        response = chat.invoke(prompt)
-        from langchain_core.messages import AIMessage, HumanMessage
+        # Invoke the model with this prompt
+        response = chat.invoke(prompt_value)
+        from langchain_core.messages import HumanMessage, AIMessage
 
         memory.chat_memory.add_user_message(query)
         memory.chat_memory.add_ai_message(response.content)
-        
-        print(prompt)
-
-        logger.info(f"Model response (first 200 chars): {response.content[:200]}", extra={"api_path": "llm_response"})
 
         print(response.content)
-
+        logger.info(f"Model response (first 200 chars): {response.content[:200]}", extra={"api_path": "llm_response"})
+        
     except Exception as e:
         logger.error(f"Error during chat: {e}", extra={"api_path": "llm_response"})
         print("An error occurred. Please try again.")
     
 
-
-#print(response["result"])
-#print(response["source"])
 
 """
 Page 13 has low text (812 chars)
