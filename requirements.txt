@@ -1,0 +1,9 @@
+langchain
+langchain-openai
+openai
+python-dotenv
+pypdf
+pytesseract
+pdf2image
+Pillow
+faiss-cpu
